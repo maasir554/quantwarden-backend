@@ -89,6 +89,7 @@ class SecurityAnalysisInfo(BaseModel):
     certificate_valid: bool
     strong_cipher: bool
     key_size_adequate: bool
+    self_signed_cert: bool
     warnings: List[str] = Field(default_factory=list)
 
 class SSLAnalysisResponse(BaseModel):

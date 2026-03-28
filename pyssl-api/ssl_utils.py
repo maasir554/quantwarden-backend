@@ -5,6 +5,7 @@ from cryptography import x509
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives.asymmetric import rsa, ec, dsa, ed25519, ed448
 from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.asymmetric import padding
 from cryptography.x509.oid import NameOID, ExtensionOID, SignatureAlgorithmOID
 
 from models import (
@@ -64,6 +65,10 @@ def analyze_ssl(domain: str) -> SSLAnalysisResponse:
 
     # Parse the certificate
     cert = x509.load_der_x509_certificate(der_cert, default_backend())
+
+    self_signed_cert = is_self_signed_certificate(cert)
+    if self_signed_cert:
+        warnings.append("Certificate appears to be self-signed.")
 
     # Validity
     not_valid_before = cert.not_valid_before_utc
@@ -326,6 +331,42 @@ def analyze_ssl(domain: str) -> SSLAnalysisResponse:
             certificate_valid=certificate_valid,
             strong_cipher=strong_cipher,
             key_size_adequate=key_size_adequate,
+            self_signed_cert=self_signed_cert,
             warnings=warnings
         )
     )
+
+
+def is_self_signed_certificate(cert: x509.Certificate) -> bool:
+    if cert.issuer != cert.subject:
+        return False
+
+    public_key = cert.public_key()
+    try:
+        if isinstance(public_key, rsa.RSAPublicKey):
+            public_key.verify(
+                cert.signature,
+                cert.tbs_certificate_bytes,
+                padding.PKCS1v15(),
+                cert.signature_hash_algorithm,
+            )
+        elif isinstance(public_key, ec.EllipticCurvePublicKey):
+            public_key.verify(
+                cert.signature,
+                cert.tbs_certificate_bytes,
+                ec.ECDSA(cert.signature_hash_algorithm),
+            )
+        elif isinstance(public_key, dsa.DSAPublicKey):
+            public_key.verify(
+                cert.signature,
+                cert.tbs_certificate_bytes,
+                cert.signature_hash_algorithm,
+            )
+        elif isinstance(public_key, ed25519.Ed25519PublicKey) or isinstance(public_key, ed448.Ed448PublicKey):
+            public_key.verify(cert.signature, cert.tbs_certificate_bytes)
+        else:
+            return False
+
+        return True
+    except Exception:
+        return False

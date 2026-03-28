@@ -65,6 +65,7 @@ curl -X POST http://localhost:8000/api/v1/ssl-analysis \
     "certificate_valid": true,
     "strong_cipher": true,
     "key_size_adequate": true,
+    "self_signed_cert": false,
     "warnings": []
   }
 }
