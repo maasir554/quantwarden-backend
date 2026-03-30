@@ -147,6 +147,72 @@ python3 start_monorepo_servers.py \
 
 This keeps dependencies isolated between `one-for-all-subdomains`, `pyssl-api`, and `nmap-api` while still allowing a fallback when no venv exists.
 
+## Ubuntu VM Deployment (Docker)
+
+For Azure Ubuntu VMs, the easiest production-style deployment is Docker Compose.
+
+### 1) Install Docker Engine + Compose plugin
+
+```bash
+sudo apt-get update
+sudo apt-get install -y ca-certificates curl gnupg
+sudo install -m 0755 -d /etc/apt/keyrings
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+sudo chmod a+r /etc/apt/keyrings/docker.gpg
+
+echo \
+	"deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu \
+	$(. /etc/os-release && echo \"$VERSION_CODENAME\") stable" | \
+	sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+
+sudo apt-get update
+sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+sudo usermod -aG docker $USER
+```
+
+Log out/in once after `usermod`.
+
+### 2) Run the stack
+
+From monorepo root:
+
+```bash
+cp .env.docker.example .env
+docker compose up -d --build
+```
+
+This starts:
+
+- `subfinder-api` (8085)
+- `pyssl-api` (8000)
+- `nmap-api` (8010)
+- `mcp-monorepo-server` (internal MCP bridge service)
+
+Optional OneForAll API profile:
+
+```bash
+docker compose --profile oneforall up -d --build
+```
+
+### 3) Check status and logs
+
+```bash
+docker compose ps
+docker compose logs -f nmap-api
+```
+
+### 4) Stop the stack
+
+```bash
+docker compose down
+```
+
+Notes:
+
+- Service Dockerfiles are in each service directory.
+- `nmap-api` container includes the `nmap` CLI package.
+- Host ports are configurable via `.env` using `.env.docker.example` as the template.
+
 ## MCP Server For AI Agents
 
 The monorepo now includes an MCP server so external AI agents can call backend APIs through a single tool interface.
