@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Monorepo launcher for OneForAll API, Subfinder API, and PySSL API."""
+"""Monorepo launcher for OneForAll API, Subfinder API, PySSL API, and Nmap API."""
 
 from __future__ import annotations
 
@@ -19,6 +19,7 @@ ROOT = Path(__file__).resolve().parent
 ONEFORALL_DIR = ROOT / "one-for-all-subdomains"
 SUBFINDER_DIR = ROOT / "subfinder-api"
 PYSSL_DIR = ROOT / "pyssl-api"
+NMAP_DIR = ROOT / "nmap-api"
 
 COLOR_RESET = "\033[0m"
 COLOR_RED = "\033[31m"
@@ -66,7 +67,7 @@ def log_setup(message: str) -> None:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Start OneForAll API, Subfinder API, and PySSL API with auto port management."
+        description="Start OneForAll API, Subfinder API, PySSL API, and Nmap API with auto port management."
     )
     parser.add_argument("--setup", action="store_true", help="Interactive setup wizard.")
     parser.add_argument("--host", default="127.0.0.1", help="Host for URL display and port checks.")
@@ -74,6 +75,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--oneforall-port", type=int, default=8002, help="Preferred OneForAll API port.")
     parser.add_argument("--subfinder-port", type=int, default=8085, help="Preferred Subfinder API port.")
     parser.add_argument("--pyssl-port", type=int, default=8000, help="Preferred PySSL API port.")
+    parser.add_argument("--nmap-port", type=int, default=8010, help="Preferred Nmap API port.")
 
     parser.add_argument(
         "--persist-env",
@@ -95,6 +97,11 @@ def parse_args() -> argparse.Namespace:
         "--pyssl-python",
         default="",
         help="Explicit Python executable for PySSL service.",
+    )
+    parser.add_argument(
+        "--nmap-python",
+        default="",
+        help="Explicit Python executable for Nmap service.",
     )
     parser.add_argument("--go-cmd", default="go", help="Go command used to run Subfinder API.")
     return parser.parse_args()
@@ -261,6 +268,7 @@ def main() -> int:
         args.oneforall_port = ask_port("OneForAll API", args.oneforall_port)
         args.subfinder_port = ask_port("Subfinder API", args.subfinder_port)
         args.pyssl_port = ask_port("PySSL API", args.pyssl_port)
+        args.nmap_port = ask_port("Nmap API", args.nmap_port)
         args.persist_env = ask_yes_no("Persist Subfinder .env updates", args.persist_env)
 
     oneforall_port = resolve_port(args.host, args.oneforall_port, "OneForAll API")
@@ -274,6 +282,13 @@ def main() -> int:
     pyssl_port = resolve_port(args.host, pyssl_candidate, "PySSL API")
     if pyssl_port in {oneforall_port, subfinder_port}:
         pyssl_port = resolve_port(args.host, pyssl_port + 1, "PySSL API")
+
+    nmap_candidate = args.nmap_port
+    if nmap_candidate in {oneforall_port, subfinder_port, pyssl_port}:
+        log_warn(f"Nmap preferred port {nmap_candidate} conflicts with another service; selecting a free port automatically")
+    nmap_port = resolve_port(args.host, nmap_candidate, "Nmap API")
+    while nmap_port in {oneforall_port, subfinder_port, pyssl_port}:
+        nmap_port = resolve_port(args.host, nmap_port + 1, "Nmap API")
 
     oneforall_url = f"http://{args.host}:{oneforall_port}"
     subfinder_addr = f":{subfinder_port}"
@@ -296,6 +311,7 @@ def main() -> int:
         "OneForAll API", ONEFORALL_DIR, args.oneforall_python, args.python_cmd
     )
     pyssl_python = resolve_python_executable("PySSL API", PYSSL_DIR, args.pyssl_python, args.python_cmd)
+    nmap_python = resolve_python_executable("Nmap API", NMAP_DIR, args.nmap_python, args.python_cmd)
 
     oneforall = ManagedProcess(
         name="oneforall",
@@ -325,12 +341,21 @@ def main() -> int:
         env=common_env,
     )
 
-    services = [oneforall, subfinder, pyssl]
+    nmap = ManagedProcess(
+        name="nmap",
+        tag_color=COLOR_YELLOW,
+        command=[nmap_python, "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", str(nmap_port)],
+        cwd=NMAP_DIR,
+        env=common_env,
+    )
+
+    services = [oneforall, subfinder, pyssl, nmap]
 
     log_info(color("Monorepo services starting", COLOR_BOLD))
     log_info(f"OneForAll URL: {oneforall_url}")
     log_info(f"Subfinder URL: http://{args.host}:{subfinder_port}")
     log_info(f"PySSL URL: http://{args.host}:{pyssl_port}")
+    log_info(f"Nmap URL: http://{args.host}:{nmap_port}")
 
     try:
         for svc in services:
