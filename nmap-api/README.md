@@ -170,6 +170,35 @@ curl -X POST http://localhost:8010/api/v1/security-intelligence \
   -d '{"domain": "example.com", "full_port_scan": false, "udp_scan": false, "response_profile": "concise"}'
 ```
 
+### POST `/ethical-scan` (or `/api/v1/ethical-scan`)
+
+Stateless, polite PQC-oriented scan focused on HTTPS/TLS and SSH signals.
+
+Request body:
+
+```json
+{
+  "target": "example.com",
+  "include_tls_version_tests": true,
+  "user_agent": "PQCSecurityScanner/1.0 (+https://example.com/scanner-info; security@example.com)"
+}
+```
+
+Example:
+
+```bash
+curl -X POST http://localhost:8010/ethical-scan \
+  -H "Content-Type: application/json" \
+  -d '{"target": "example.com", "include_tls_version_tests": true}'
+```
+
+Highlights:
+
+- Scans only ports 443 and 22 with conservative timing flags.
+- Uses SSL/TLS and SSH NSE scripts for PQC readiness evidence.
+- Adds `ssh_found` to indicate whether SSH was positively detected.
+- Returns in-memory structured results only (no scan files written to disk).
+
 ## Response Highlights
 
 - `open_ports`: detailed discovered services
@@ -192,6 +221,9 @@ curl -X POST http://localhost:8010/api/v1/security-intelligence \
 
 - Error: `nmap is not installed or not in PATH`
   - Install nmap and retry.
+- Error mentions root privileges
+  - The API now auto-uses non-root TCP connect scanning when root-only scan types are unavailable.
+  - If `udp_scan=true`, run the API with elevated privileges to enable UDP probing.
 - DNS resolution failures
   - Verify domain spelling and network DNS access.
 - Long scans

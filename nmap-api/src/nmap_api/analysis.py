@@ -179,14 +179,8 @@ def detect_certificate_chain_issues(script_outputs: Dict[str, str]) -> tuple[Lis
         ("hostname_mismatch", "subject alt name" in lowered and "does not match" in lowered),
     ]
 
-    key_algo = None
-    key_size = None
-    algo_match = re.search(r"Public Key type:\s*([A-Za-z0-9_-]+)", output)
-    bits_match = re.search(r"Public Key bits:\s*(\d+)", output)
-    if algo_match:
-        key_algo = algo_match.group(1).upper()
-    if bits_match:
-        key_size = int(bits_match.group(1))
+    key_algo = extract_cert_key_algorithm(output)
+    key_size = extract_cert_key_size_bits(output)
 
     return [
         CertificateIssue(issue=name, detected=detected, evidence=output[:600] if output else "No ssl-cert output.")
@@ -202,8 +196,9 @@ def extract_certificate_chain_intelligence(script_outputs: Dict[str, str]) -> Ce
     subject_count = len(re.findall(r"(?im)^\s*Subject:\s*", output))
     chain_depth = max(issuer_count, subject_count) if (issuer_count or subject_count) else None
 
-    ocsp_urls = sorted(set(re.findall(r"(?i)OCSP[^\n]*URI:([^\s,]+)", output)))
-    ca_urls = sorted(set(re.findall(r"(?i)CA\s*Issuers[^\n]*URI:([^\s,]+)", output)))
+    all_urls = set(re.findall(r"https?://[^\s,\)]+", output))
+    ocsp_urls = sorted(url for url in all_urls if "ocsp" in url.lower())
+    ca_urls = sorted(url for url in all_urls if any(token in url.lower() for token in ["issuer", "ca", "crt"]))
 
     sct_present: bool | None = None
     if output:
@@ -230,6 +225,41 @@ def extract_certificate_chain_intelligence(script_outputs: Dict[str, str]) -> Ce
         ca_issuers_urls=ca_urls,
         sct_present=sct_present,
     )
+
+
+def extract_cert_key_algorithm(output: str) -> str | None:
+    patterns = [
+        r"Public Key type:\s*([A-Za-z0-9._-]+)",
+        r"Public key algorithm:\s*([A-Za-z0-9._-]+)",
+        r"pubkey:\s*([A-Za-z0-9._-]+)",
+        r"Algorithm:\s*([A-Za-z0-9._-]+)",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, output, flags=re.IGNORECASE)
+        if match:
+            return match.group(1).upper()
+    return None
+
+
+def extract_cert_key_size_bits(output: str) -> int | None:
+    patterns = [
+        r"Public Key bits:\s*(\d+)",
+        r"Public key size:\s*(\d+)",
+        r"Public-Key:\s*\((\d+)\s*bit\)",
+        r"pubkey:[^\n]*?(\d{3,5})\s*bits",
+        r"key\s*size[^\n:]*:\s*(\d{3,5})",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, output, flags=re.IGNORECASE)
+        if match:
+            return int(match.group(1))
+
+    for line in output.splitlines():
+        if "pubkey" in line.lower() or "public key" in line.lower():
+            match = re.search(r"(\d{3,5})\s*bits", line, flags=re.IGNORECASE)
+            if match:
+                return int(match.group(1))
+    return None
 
 
 def analyze_security_headers(domain: str) -> SecurityHeadersResult:

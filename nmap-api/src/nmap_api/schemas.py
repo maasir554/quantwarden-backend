@@ -148,3 +148,51 @@ class ScanJobStatusResponse(BaseModel):
     completed_at: Optional[str] = None
     error: Optional[str] = None
     result: Optional[ScanResponse] = None
+
+
+class EthicalScanRequest(BaseModel):
+    target: str = Field(..., description="Target domain or IPv4 address")
+    include_tls_version_tests: bool = Field(
+        default=True,
+        description="If true, probe TLS 1.0/1.1/1.2/1.3 support with focused checks.",
+    )
+    user_agent: str = Field(
+        default="PQCSecurityScanner/1.0 (+https://example.com/scanner-info; security@example.com)",
+        description="Custom user-agent supplied to compatible NSE scripts.",
+    )
+
+
+class SSHHostKeyInfo(BaseModel):
+    algorithm: str
+    key_size_bits: Optional[int] = None
+    fingerprint: Optional[str] = None
+
+
+class SSHIntelligence(BaseModel):
+    kex_algorithms: List[str] = Field(default_factory=list)
+    host_key_algorithms: List[str] = Field(default_factory=list)
+    encryption_algorithms: List[str] = Field(default_factory=list)
+    mac_algorithms: List[str] = Field(default_factory=list)
+    host_keys: List[SSHHostKeyInfo] = Field(default_factory=list)
+
+
+class TLSVersionProbeResult(BaseModel):
+    tls_version: str
+    supported: bool
+    evidence: str
+
+
+class EthicalScanResponse(BaseModel):
+    target: str
+    resolved_ip: Optional[str] = None
+    open_ports: List[OpenPortInfo] = Field(default_factory=list)
+    ssh_found: bool = False
+    supported_tls_versions: List[str] = Field(default_factory=list)
+    supported_cipher_suites: Dict[str, List[str]] = Field(default_factory=dict)
+    tls_version_probes: List[TLSVersionProbeResult] = Field(default_factory=list)
+    pqc_safety_intelligence: PQCSafetyIntel
+    certificate_chain_intelligence: CertificateChainIntel
+    certificate_chain_issues: List[CertificateIssue] = Field(default_factory=list)
+    ssh_intelligence: SSHIntelligence
+    scan_notes: List[str] = Field(default_factory=list)
+    raw_nmap_commands: List[str] = Field(default_factory=list)

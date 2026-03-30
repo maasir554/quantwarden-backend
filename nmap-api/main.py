@@ -2,8 +2,16 @@ from __future__ import annotations
 
 from fastapi import FastAPI, HTTPException
 
+from src.nmap_api.ethical_scan import ethical_scan
 from src.nmap_api.jobs import job_manager
-from src.nmap_api.schemas import ScanJobCreateResponse, ScanJobStatusResponse, ScanRequest, ScanResponse
+from src.nmap_api.schemas import (
+    EthicalScanRequest,
+    EthicalScanResponse,
+    ScanJobCreateResponse,
+    ScanJobStatusResponse,
+    ScanRequest,
+    ScanResponse,
+)
 from src.nmap_api.service import scan_domain
 
 app = FastAPI(
@@ -26,6 +34,12 @@ def security_intelligence(req: ScanRequest) -> ScanResponse:
         udp_scan=req.udp_scan,
         response_profile=req.response_profile,
     )
+
+
+@app.post("/ethical-scan", response_model=EthicalScanResponse)
+@app.post("/api/v1/ethical-scan", response_model=EthicalScanResponse)
+def ethical_scan_endpoint(req: EthicalScanRequest) -> EthicalScanResponse:
+    return ethical_scan(req)
 
 
 @app.post("/api/v1/scans", response_model=ScanJobCreateResponse)
