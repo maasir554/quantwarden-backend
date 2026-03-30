@@ -183,16 +183,11 @@ docker compose up -d --build
 
 This starts:
 
+- `oneforall-api` (8002)
 - `subfinder-api` (8085)
 - `pyssl-api` (8000)
 - `nmap-api` (8010)
 - `mcp-monorepo-server` (internal MCP bridge service)
-
-Optional OneForAll API profile:
-
-```bash
-docker compose --profile oneforall up -d --build
-```
 
 ### 3) Check status and logs
 

@@ -6,7 +6,9 @@ services:
     container_name: quantwarden-subfinder-api
     environment:
       SUBFINDER_API_ADDR: ":8085"
-      ONEFORALL_API_URL: ""
+      ONEFORALL_API_URL: "http://oneforall-api:8002"
+    depends_on:
+      - oneforall-api
     ports:
       - "${SUBFINDER_PORT:-8085}:8085"
     restart: unless-stopped
@@ -48,7 +50,6 @@ services:
     restart: unless-stopped
 
   oneforall-api:
-    profiles: ["oneforall"]
     build:
       context: ./one-for-all-subdomains
       dockerfile: Dockerfile.api
