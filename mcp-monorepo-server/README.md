@@ -9,6 +9,7 @@ Stateless MCP server that lets AI agents call your monorepo backend APIs.
 - `nmap_security_intelligence`
 - `nmap_ethical_scan`
 - `pyssl_analysis`
+- `openssl_profile`
 - `subfinder_combined`
 - `subfinder_only`
 - `assetfinder_only`
@@ -44,6 +45,7 @@ Default URLs:
 - `SUBFINDER_API_URL=http://127.0.0.1:8085`
 - `PYSSL_API_URL=http://127.0.0.1:8000`
 - `NMAP_API_URL=http://127.0.0.1:8010`
+- `OPENSSL_API_URL=http://127.0.0.1:8020`
 
 Set env vars before launch if ports differ.
 
@@ -52,6 +54,7 @@ ONEFORALL_API_URL=http://127.0.0.1:9002 \
 SUBFINDER_API_URL=http://127.0.0.1:9085 \
 PYSSL_API_URL=http://127.0.0.1:9000 \
 NMAP_API_URL=http://127.0.0.1:9010 \
+OPENSSL_API_URL=http://127.0.0.1:9020 \
 python server.py
 ```
 

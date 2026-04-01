@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Monorepo launcher for OneForAll API, Subfinder API, PySSL API, and Nmap API."""
+"""Monorepo launcher for OneForAll API, Subfinder API, PySSL API, Nmap API, and OpenSSL API."""
 
 from __future__ import annotations
 
@@ -20,6 +20,7 @@ ONEFORALL_DIR = ROOT / "one-for-all-subdomains"
 SUBFINDER_DIR = ROOT / "subfinder-api"
 PYSSL_DIR = ROOT / "pyssl-api"
 NMAP_DIR = ROOT / "nmap-api"
+OPENSSL_DIR = ROOT / "openssl-api"
 
 COLOR_RESET = "\033[0m"
 COLOR_RED = "\033[31m"
@@ -67,7 +68,7 @@ def log_setup(message: str) -> None:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Start OneForAll API, Subfinder API, PySSL API, and Nmap API with auto port management."
+        description="Start OneForAll API, Subfinder API, PySSL API, Nmap API, and OpenSSL API with auto port management."
     )
     parser.add_argument("--setup", action="store_true", help="Interactive setup wizard.")
     parser.add_argument("--host", default="127.0.0.1", help="Host for URL display and port checks.")
@@ -76,6 +77,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--subfinder-port", type=int, default=8085, help="Preferred Subfinder API port.")
     parser.add_argument("--pyssl-port", type=int, default=8000, help="Preferred PySSL API port.")
     parser.add_argument("--nmap-port", type=int, default=8010, help="Preferred Nmap API port.")
+    parser.add_argument("--openssl-port", type=int, default=8020, help="Preferred OpenSSL API port.")
 
     parser.add_argument(
         "--persist-env",
@@ -102,6 +104,11 @@ def parse_args() -> argparse.Namespace:
         "--nmap-python",
         default="",
         help="Explicit Python executable for Nmap service.",
+    )
+    parser.add_argument(
+        "--openssl-python",
+        default="",
+        help="Explicit Python executable for OpenSSL service.",
     )
     parser.add_argument("--go-cmd", default="go", help="Go command used to run Subfinder API.")
     return parser.parse_args()
@@ -131,13 +138,29 @@ def ask_yes_no(label: str, default: bool) -> bool:
 
 
 def is_port_free(host: str, port: int) -> bool:
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    del host  # Port checks are done against wildcard interfaces used by services.
+
+    ipv4_ok = True
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock4:
+        sock4.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
-            sock.bind((host, port))
-            return True
+            sock4.bind(("0.0.0.0", port))
         except OSError:
-            return False
+            ipv4_ok = False
+
+    ipv6_ok = True
+    try:
+        with socket.socket(socket.AF_INET6, socket.SOCK_STREAM) as sock6:
+            sock6.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            try:
+                sock6.bind(("::", port))
+            except OSError:
+                ipv6_ok = False
+    except OSError:
+        # Systems without IPv6 support should not fail port detection.
+        ipv6_ok = True
+
+    return ipv4_ok and ipv6_ok
 
 
 def next_free_port(host: str, start_port: int) -> int:
@@ -208,6 +231,70 @@ def resolve_python_executable(service_name: str, service_dir: Path, explicit: st
     return resolved
 
 
+def python_has_module(python_exec: str, module_name: str) -> bool:
+    check = subprocess.run(
+        [python_exec, "-c", f"import {module_name}"],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        check=False,
+        text=True,
+    )
+    return check.returncode == 0
+
+
+def python_has_modules(python_exec: str, module_names: List[str]) -> bool:
+    return all(python_has_module(python_exec, mod) for mod in module_names)
+
+
+def ensure_python_service_ready(
+    service_name: str,
+    python_exec: str,
+    service_dir: Path,
+    module_names: List[str] | None = None,
+    alternates: List[str] | None = None,
+) -> str:
+    required = module_names or ["uvicorn", "fastapi", "pydantic"]
+
+    if python_has_modules(python_exec, required):
+        return python_exec
+
+    for alt in alternates or []:
+        if not alt or alt == python_exec:
+            continue
+        if python_has_modules(alt, required):
+            log_warn(
+                f"{service_name} selected python is missing required modules {required}; "
+                f"switching to compatible interpreter: {alt}"
+            )
+            return alt
+
+    requirements = service_dir / "requirements.txt"
+    if not requirements.exists():
+        raise RuntimeError(
+            f"{service_name} python '{python_exec}' is missing required modules {required} and no requirements.txt was found"
+        )
+
+    log_warn(f"{service_name} missing {required} in selected python; installing dependencies from {requirements}")
+    install = subprocess.run(
+        [python_exec, "-m", "pip", "install", "-r", str(requirements)],
+        cwd=str(service_dir),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        check=False,
+    )
+    if install.returncode != 0:
+        raise RuntimeError(
+            f"{service_name} dependency bootstrap failed (exit {install.returncode}):\n{install.stdout[-1200:]}"
+        )
+
+    if not python_has_modules(python_exec, required):
+        raise RuntimeError(f"{service_name} still missing required modules {required} after dependency bootstrap")
+
+    log_setup(f"{service_name} dependencies installed successfully")
+    return python_exec
+
+
 class ManagedProcess:
     def __init__(self, name: str, tag_color: str, command: List[str], cwd: Path, env: Dict[str, str]) -> None:
         self.name = name
@@ -269,6 +356,7 @@ def main() -> int:
         args.subfinder_port = ask_port("Subfinder API", args.subfinder_port)
         args.pyssl_port = ask_port("PySSL API", args.pyssl_port)
         args.nmap_port = ask_port("Nmap API", args.nmap_port)
+        args.openssl_port = ask_port("OpenSSL API", args.openssl_port)
         args.persist_env = ask_yes_no("Persist Subfinder .env updates", args.persist_env)
 
     oneforall_port = resolve_port(args.host, args.oneforall_port, "OneForAll API")
@@ -289,6 +377,15 @@ def main() -> int:
     nmap_port = resolve_port(args.host, nmap_candidate, "Nmap API")
     while nmap_port in {oneforall_port, subfinder_port, pyssl_port}:
         nmap_port = resolve_port(args.host, nmap_port + 1, "Nmap API")
+
+    openssl_candidate = args.openssl_port
+    if openssl_candidate in {oneforall_port, subfinder_port, pyssl_port, nmap_port}:
+        log_warn(
+            f"OpenSSL preferred port {openssl_candidate} conflicts with another service; selecting a free port automatically"
+        )
+    openssl_port = resolve_port(args.host, openssl_candidate, "OpenSSL API")
+    while openssl_port in {oneforall_port, subfinder_port, pyssl_port, nmap_port}:
+        openssl_port = resolve_port(args.host, openssl_port + 1, "OpenSSL API")
 
     oneforall_url = f"http://{args.host}:{oneforall_port}"
     subfinder_addr = f":{subfinder_port}"
@@ -312,6 +409,27 @@ def main() -> int:
     )
     pyssl_python = resolve_python_executable("PySSL API", PYSSL_DIR, args.pyssl_python, args.python_cmd)
     nmap_python = resolve_python_executable("Nmap API", NMAP_DIR, args.nmap_python, args.python_cmd)
+    openssl_python = resolve_python_executable("OpenSSL API", OPENSSL_DIR, args.openssl_python, args.python_cmd)
+    fallback_python = shutil.which(args.python_cmd) or ""
+
+    pyssl_python = ensure_python_service_ready(
+        "PySSL API",
+        pyssl_python,
+        PYSSL_DIR,
+        alternates=[nmap_python, fallback_python],
+    )
+    nmap_python = ensure_python_service_ready(
+        "Nmap API",
+        nmap_python,
+        NMAP_DIR,
+        alternates=[pyssl_python, fallback_python],
+    )
+    openssl_python = ensure_python_service_ready(
+        "OpenSSL API",
+        openssl_python,
+        OPENSSL_DIR,
+        alternates=[nmap_python, pyssl_python, fallback_python],
+    )
 
     oneforall = ManagedProcess(
         name="oneforall",
@@ -349,13 +467,22 @@ def main() -> int:
         env=common_env,
     )
 
-    services = [oneforall, subfinder, pyssl, nmap]
+    openssl = ManagedProcess(
+        name="openssl",
+        tag_color=COLOR_GREEN,
+        command=[openssl_python, "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", str(openssl_port)],
+        cwd=OPENSSL_DIR,
+        env=common_env,
+    )
+
+    services = [oneforall, subfinder, pyssl, nmap, openssl]
 
     log_info(color("Monorepo services starting", COLOR_BOLD))
     log_info(f"OneForAll URL: {oneforall_url}")
     log_info(f"Subfinder URL: http://{args.host}:{subfinder_port}")
     log_info(f"PySSL URL: http://{args.host}:{pyssl_port}")
     log_info(f"Nmap URL: http://{args.host}:{nmap_port}")
+    log_info(f"OpenSSL URL: http://{args.host}:{openssl_port}")
 
     try:
         for svc in services:

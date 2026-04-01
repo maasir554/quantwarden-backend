@@ -8,6 +8,7 @@ This repository now contains multiple APIs that can be run together.
 - Subfinder API
 - PySSL API
 - Nmap Security Intelligence API
+- OpenSSL TLS Profile API
 
 ## Default ports
 
@@ -15,6 +16,7 @@ This repository now contains multiple APIs that can be run together.
 - Subfinder API: 8085
 - PySSL API: 8000
 - Nmap API: 8010
+- OpenSSL API: 8020
 
 ## Quick start with one command
 
@@ -30,6 +32,7 @@ What this does:
 - Starts Subfinder API
 - Starts PySSL API
 - Starts Nmap API
+- Starts OpenSSL API
 - Detects busy ports and automatically reassigns to free ports
 - Injects runtime env vars for Subfinder so it can reach OneForAll
 
@@ -49,6 +52,7 @@ Setup mode asks:
 - Subfinder port
 - PySSL port
 - Nmap port
+- OpenSSL port
 - Whether to persist Subfinder env settings into subfinder-api/.env
 
 ## Persist env updates into subfinder-api/.env
@@ -98,6 +102,13 @@ cd nmap-api
 python3 -m uvicorn main:app --host 0.0.0.0 --port 8010 --reload
 ```
 
+### 5) Start OpenSSL API on a non-conflicting port
+
+```bash
+cd openssl-api
+python3 -m uvicorn main:app --host 0.0.0.0 --port 8020 --reload
+```
+
 ## Optional explicit port arguments
 
 You can pass explicit preferred ports to launcher:
@@ -110,6 +121,12 @@ Include Nmap explicitly if desired:
 
 ```bash
 python3 start_monorepo_servers.py --oneforall-port 8002 --subfinder-port 8085 --pyssl-port 8000 --nmap-port 8010
+```
+
+Include OpenSSL explicitly if desired:
+
+```bash
+python3 start_monorepo_servers.py --oneforall-port 8002 --subfinder-port 8085 --pyssl-port 8000 --nmap-port 8010 --openssl-port 8020
 ```
 
 If a preferred port is busy, the launcher logs a warning and picks the next available port.
@@ -142,10 +159,11 @@ Override examples:
 python3 start_monorepo_servers.py \
 	--oneforall-python /abs/path/to/oneforall/.venv/bin/python \
 	--pyssl-python /abs/path/to/pyssl/venv/bin/python \
-	--nmap-python /abs/path/to/nmap-api/.venv/bin/python
+	--nmap-python /abs/path/to/nmap-api/.venv/bin/python \
+	--openssl-python /abs/path/to/openssl-api/.venv/bin/python
 ```
 
-This keeps dependencies isolated between `one-for-all-subdomains`, `pyssl-api`, and `nmap-api` while still allowing a fallback when no venv exists.
+This keeps dependencies isolated between `one-for-all-subdomains`, `pyssl-api`, `nmap-api`, and `openssl-api` while still allowing a fallback when no venv exists.
 
 ## Ubuntu VM Deployment (Docker)
 
@@ -187,6 +205,7 @@ This starts:
 - `subfinder-api` (8085)
 - `pyssl-api` (8000)
 - `nmap-api` (8010)
+- `openssl-api` (8020)
 - `mcp-monorepo-server` (internal MCP bridge service)
 
 ### 3) Check status and logs
@@ -235,6 +254,7 @@ Common tools exposed by this MCP server:
 
 - `nmap_security_intelligence`
 - `nmap_ethical_scan`
+- `openssl_profile`
 - `pyssl_analysis`
 - `subfinder_combined`
 - `subfinder_only`
@@ -247,4 +267,5 @@ By default the server targets localhost service ports from this monorepo launche
 - `SUBFINDER_API_URL`
 - `PYSSL_API_URL`
 - `NMAP_API_URL`
+- `OPENSSL_API_URL`
 

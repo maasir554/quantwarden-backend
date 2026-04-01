@@ -10,7 +10,14 @@ from typing import Dict, List
 
 from fastapi import HTTPException
 
-from .analysis import detect_certificate_chain_issues, extract_certificate_chain_intelligence, pqc_intelligence
+from .analysis import (
+    detect_certificate_chain_issues,
+    extract_certificate_chain_intelligence,
+    extract_tls_encryption_algorithms,
+    extract_tls_kex_algorithms,
+    extract_tls_signature_algorithms,
+    pqc_intelligence,
+)
 from .nmap_runner import NmapScanData, merge_scan_data, parse_nmap_xml
 from .schemas import (
     CertificateIssue,
@@ -78,6 +85,7 @@ def ethical_scan(req: EthicalScanRequest) -> EthicalScanResponse:
         open_ports=[],
         tls_versions=[],
         tls_ciphers={},
+        tls_cipher_grades={},
         script_outputs={},
     )
 
@@ -154,7 +162,14 @@ def ethical_scan(req: EthicalScanRequest) -> EthicalScanResponse:
         ],
         ssh_found=ssh_found,
         supported_tls_versions=merged_scan.tls_versions,
+        tls_key_exchange_algorithms=extract_tls_kex_algorithms(merged_scan.tls_ciphers),
+        tls_encryption_algorithms=extract_tls_encryption_algorithms(merged_scan.tls_ciphers),
+        tls_signature_algorithms=extract_tls_signature_algorithms(
+            merged_scan.tls_ciphers,
+            merged_scan.script_outputs,
+        ),
         supported_cipher_suites=merged_scan.tls_ciphers,
+        supported_cipher_grades=merged_scan.tls_cipher_grades,
         tls_version_probes=version_probe_results,
         pqc_safety_intelligence=pqc,
         certificate_chain_intelligence=cert_chain,

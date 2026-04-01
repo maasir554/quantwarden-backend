@@ -33,6 +33,10 @@ SERVICES: Dict[str, ServiceConfig] = {
         name="nmap",
         base_url=os.getenv("NMAP_API_URL", "http://127.0.0.1:8010"),
     ),
+    "openssl": ServiceConfig(
+        name="openssl",
+        base_url=os.getenv("OPENSSL_API_URL", "http://127.0.0.1:8020"),
+    ),
 }
 
 
@@ -167,6 +171,28 @@ def pyssl_analysis(domain: str, timeout_seconds: float = 60.0) -> Dict[str, Any]
 
 
 @mcp.tool()
+def openssl_profile(
+    target: str,
+    port: int = 443,
+    timeout_seconds: float = 120.0,
+    include_raw_debug: bool = False,
+) -> Dict[str, Any]:
+    """Run deep OpenSSL profile using /api/v1/openssl-profile."""
+    return _request(
+        service="openssl",
+        method="POST",
+        path="/api/v1/openssl-profile",
+        body={
+            "target": target,
+            "port": port,
+            "timeout_seconds": int(timeout_seconds),
+            "include_raw_debug": include_raw_debug,
+        },
+        timeout_seconds=timeout_seconds,
+    )
+
+
+@mcp.tool()
 def subfinder_combined(domain: str, timeout_seconds: float = 90.0) -> Dict[str, Any]:
     """Run combined subdomain discovery using Subfinder API /subdomains."""
     return _request(
@@ -204,7 +230,7 @@ def assetfinder_only(domain: str, timeout_seconds: float = 90.0) -> Dict[str, An
 
 @mcp.tool()
 def monorepo_api_request(
-    service: Literal["oneforall", "subfinder", "pyssl", "nmap"],
+    service: Literal["oneforall", "subfinder", "pyssl", "nmap", "openssl"],
     method: Literal["GET", "POST", "PUT", "PATCH", "DELETE"],
     path: str,
     body: Dict[str, Any] | None = None,

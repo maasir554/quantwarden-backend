@@ -119,7 +119,11 @@ class ScanResponse(BaseModel):
     resolved_ip: Optional[str] = None
     open_ports: List[OpenPortInfo] = Field(default_factory=list)
     supported_tls_versions: List[str] = Field(default_factory=list)
+    tls_key_exchange_algorithms: List[str] = Field(default_factory=list)
+    tls_encryption_algorithms: List[str] = Field(default_factory=list)
+    tls_signature_algorithms: List[str] = Field(default_factory=list)
     supported_cipher_suites: Dict[str, List[str]] = Field(default_factory=dict)
+    supported_cipher_grades: Dict[str, Dict[str, str]] = Field(default_factory=dict)
     vulnerabilities: List[VulnerabilityFinding] = Field(default_factory=list)
     certificate_chain_issues: List[CertificateIssue] = Field(default_factory=list)
     security_headers: SecurityHeadersResult
@@ -188,7 +192,11 @@ class EthicalScanResponse(BaseModel):
     open_ports: List[OpenPortInfo] = Field(default_factory=list)
     ssh_found: bool = False
     supported_tls_versions: List[str] = Field(default_factory=list)
+    tls_key_exchange_algorithms: List[str] = Field(default_factory=list)
+    tls_encryption_algorithms: List[str] = Field(default_factory=list)
+    tls_signature_algorithms: List[str] = Field(default_factory=list)
     supported_cipher_suites: Dict[str, List[str]] = Field(default_factory=dict)
+    supported_cipher_grades: Dict[str, Dict[str, str]] = Field(default_factory=dict)
     tls_version_probes: List[TLSVersionProbeResult] = Field(default_factory=list)
     pqc_safety_intelligence: PQCSafetyIntel
     certificate_chain_intelligence: CertificateChainIntel

@@ -35,6 +35,7 @@ class NmapScanData:
     open_ports: List[Dict[str, str]]
     tls_versions: List[str]
     tls_ciphers: Dict[str, List[str]]
+    tls_cipher_grades: Dict[str, Dict[str, str]]
     script_outputs: Dict[str, str]
 
 
@@ -114,6 +115,7 @@ def parse_nmap_xml(cmd: List[str], xml_output: str) -> NmapScanData:
     open_ports: List[Dict[str, str]] = []
     tls_versions: set[str] = set()
     tls_ciphers: Dict[str, set[str]] = {}
+    tls_cipher_grades: Dict[str, Dict[str, str]] = {}
     script_outputs: Dict[str, str] = {}
 
     host = root.find("host")
@@ -149,10 +151,11 @@ def parse_nmap_xml(cmd: List[str], xml_output: str) -> NmapScanData:
                         script_outputs[script_id] = joined
 
                     if script_id == "ssl-enum-ciphers":
-                        versions, ciphers = parse_ssl_enum_script(script, script_output)
+                        versions, ciphers, grades = parse_ssl_enum_script(script, script_output)
                         tls_versions.update(versions)
                         for version, suites in ciphers.items():
                             tls_ciphers.setdefault(version, set()).update(suites)
+                        merge_cipher_grades(tls_cipher_grades, grades)
 
         hostscript_elem = host.find("hostscript")
         if hostscript_elem is not None:
@@ -167,13 +170,15 @@ def parse_nmap_xml(cmd: List[str], xml_output: str) -> NmapScanData:
                 script_outputs[script_id] = joined
 
                 if script_id == "ssl-enum-ciphers":
-                    versions, ciphers = parse_ssl_enum_script(script, script_output)
+                    versions, ciphers, grades = parse_ssl_enum_script(script, script_output)
                     tls_versions.update(versions)
                     for version, suites in ciphers.items():
                         tls_ciphers.setdefault(version, set()).update(suites)
+                    merge_cipher_grades(tls_cipher_grades, grades)
 
     ordered_versions = sorted(tls_versions, key=tls_sort_key)
     ordered_ciphers = {k: sorted(v) for k, v in tls_ciphers.items()}
+    ordered_grades = {version: dict(sorted(grades.items())) for version, grades in tls_cipher_grades.items()}
 
     return NmapScanData(
         command=shlex.join(cmd),
@@ -181,13 +186,17 @@ def parse_nmap_xml(cmd: List[str], xml_output: str) -> NmapScanData:
         open_ports=open_ports,
         tls_versions=ordered_versions,
         tls_ciphers=ordered_ciphers,
+        tls_cipher_grades=ordered_grades,
         script_outputs=script_outputs,
     )
 
 
-def parse_ssl_enum_script(script_elem: ET.Element, script_output: str = "") -> Tuple[List[str], Dict[str, List[str]]]:
+def parse_ssl_enum_script(
+    script_elem: ET.Element, script_output: str = ""
+) -> Tuple[List[str], Dict[str, List[str]], Dict[str, Dict[str, str]]]:
     versions: set[str] = set()
     ciphers: Dict[str, set[str]] = {}
+    grades: Dict[str, Dict[str, str]] = {}
 
     output_text = script_output or script_elem.attrib.get("output", "")
     current_version = None
@@ -197,28 +206,67 @@ def parse_ssl_enum_script(script_elem: ET.Element, script_output: str = "") -> T
             continue
 
         if stripped.endswith(":") and ("TLS" in stripped or "SSL" in stripped):
-            current_version = stripped[:-1]
+            current_version = normalize_tls_version(stripped[:-1])
             versions.add(current_version)
             ciphers.setdefault(current_version, set())
             continue
 
-        if current_version and re.match(r"^[A-Z0-9_\-]+$", stripped):
-            ciphers[current_version].add(stripped)
+        if current_version:
+            for cipher in extract_ciphers_from_line(stripped):
+                ciphers[current_version].add(cipher)
+            grade_pairs = extract_cipher_grade_pairs_from_line(stripped)
+            for cipher, grade in grade_pairs:
+                grades.setdefault(current_version, {})[cipher] = grade
 
-    for table in script_elem.findall("table"):
-        table_key = table.attrib.get("key", "")
+    # Parse all table nodes to handle nested NSE XML structures consistently.
+    for table in script_elem.findall(".//table"):
+        table_key = (table.attrib.get("key", "") or "").strip()
+        if not table_key:
+            continue
+
         if "TLS" in table_key or "SSL" in table_key:
             version = normalize_tls_version(table_key)
             versions.add(version)
             ciphers.setdefault(version, set())
+            continue
 
-            for subtable in table.findall("table"):
-                cipher = extract_cipher_name(subtable)
-                if cipher:
-                    ciphers[version].add(cipher)
+    # Parent inference fallback for ElementTree: walk version tables and inspect descendants.
+    for version_table in script_elem.findall(".//table"):
+        version_key = (version_table.attrib.get("key", "") or "").strip()
+        if not version_key or not ("TLS" in version_key or "SSL" in version_key):
+            continue
 
-    out = {version: sorted(suites) for version, suites in ciphers.items()}
-    return sorted(versions, key=tls_sort_key), out
+        version = normalize_tls_version(version_key)
+        versions.add(version)
+        ciphers.setdefault(version, set())
+
+        for subtable in version_table.findall(".//table"):
+            cipher = extract_cipher_name(subtable)
+            if cipher:
+                ciphers[version].add(cipher)
+                grade = extract_cipher_grade_from_table(subtable)
+                if grade:
+                    grades.setdefault(version, {})[cipher] = grade
+
+        for elem in version_table.findall(".//elem"):
+            text = (elem.text or "").strip()
+            if not text:
+                continue
+            for cipher in extract_ciphers_from_line(text):
+                ciphers[version].add(cipher)
+
+    out = {
+        version: sorted(suite for suite in suites if is_valid_cipher_suite(suite))
+        for version, suites in ciphers.items()
+    }
+    out_grades: Dict[str, Dict[str, str]] = {}
+    for version, suite_list in out.items():
+        version_grades = grades.get(version, {})
+        filtered = {suite: version_grades[suite] for suite in suite_list if suite in version_grades}
+        if filtered:
+            out_grades[version] = filtered
+
+    return sorted(versions, key=tls_sort_key), out, out_grades
 
 
 def maybe_enrich_tls_data(domain: str, scan: NmapScanData) -> NmapScanData:
@@ -274,6 +322,12 @@ def merge_scan_data(primary: NmapScanData, extra: NmapScanData) -> NmapScanData:
     for version in set(primary.tls_ciphers.keys()) | set(extra.tls_ciphers.keys()):
         merged_ciphers[version] = sorted(set(primary.tls_ciphers.get(version, [])) | set(extra.tls_ciphers.get(version, [])))
 
+    merged_grades: Dict[str, Dict[str, str]] = {
+        version: dict(grades)
+        for version, grades in primary.tls_cipher_grades.items()
+    }
+    merge_cipher_grades(merged_grades, extra.tls_cipher_grades)
+
     merged_script_outputs = dict(primary.script_outputs)
     for script_id, output in extra.script_outputs.items():
         existing = merged_script_outputs.get(script_id, "")
@@ -289,6 +343,7 @@ def merge_scan_data(primary: NmapScanData, extra: NmapScanData) -> NmapScanData:
         open_ports=merged_ports,
         tls_versions=merged_versions,
         tls_ciphers=merged_ciphers,
+        tls_cipher_grades=merged_grades,
         script_outputs=merged_script_outputs,
     )
 
@@ -397,6 +452,7 @@ def probe_tls_endpoint(domain: str, port: int) -> NmapScanData | None:
         ],
         tls_versions=sorted(discovered_versions, key=tls_sort_key),
         tls_ciphers={version: sorted(suites) for version, suites in discovered_ciphers.items()},
+        tls_cipher_grades={},
         script_outputs=script_outputs,
     )
 
@@ -422,11 +478,74 @@ def render_certificate_text(pem_cert: str) -> str:
 
 
 def extract_cipher_name(table_elem: ET.Element) -> str | None:
+    table_key = (table_elem.attrib.get("key", "") or "").strip()
+    if is_cipher_name(table_key):
+        return table_key
+
     for elem in table_elem.findall("elem"):
         key = elem.attrib.get("key", "")
         if key == "name" and elem.text:
             return elem.text.strip()
+
+        text = (elem.text or "").strip()
+        if text:
+            ciphers = extract_ciphers_from_line(text)
+            if ciphers:
+                return ciphers[0]
     return None
+
+
+def extract_cipher_from_line(line: str) -> str | None:
+    ciphers = extract_ciphers_from_line(line)
+    if ciphers:
+        return ciphers[0]
+    return None
+
+
+def extract_ciphers_from_line(line: str) -> List[str]:
+    candidate = line.strip().rstrip(":")
+    return re.findall(r"\b(?:TLS|SSL)_[A-Z0-9_\-]+\b", candidate)
+
+
+def extract_cipher_grade_pairs_from_line(line: str) -> List[Tuple[str, str]]:
+    # Typical ssl-enum-ciphers line examples:
+    # TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256 (ecdh_x25519) - A
+    # TLS_RSA_WITH_AES_256_CBC_SHA - C
+    pairs = re.findall(r"\b((?:TLS|SSL)_[A-Z0-9_\-]+)\b[^\n]*?-\s*([A-F])\b", line)
+    return [(cipher, grade) for cipher, grade in pairs if is_valid_cipher_suite(cipher)]
+
+
+def extract_cipher_grade_from_table(table_elem: ET.Element) -> str | None:
+    for elem in table_elem.findall("elem"):
+        key = (elem.attrib.get("key", "") or "").strip().lower()
+        value = (elem.text or "").strip().upper()
+        if key in {"strength", "grade"} and re.fullmatch(r"[A-F]", value):
+            return value
+    return None
+
+
+def is_cipher_name(value: str) -> bool:
+    return bool(re.match(r"^(TLS|SSL)_[A-Z0-9_\-]+$", value.strip()))
+
+
+def is_valid_cipher_suite(value: str) -> bool:
+    token = value.strip()
+    if not is_cipher_name(token):
+        return False
+    # Classic suites use _WITH_; TLS 1.3 style suites start with TLS_AES_/TLS_CHACHA20_/TLS_SM4_.
+    if "_WITH_" in token:
+        return True
+    return token.startswith("TLS_AES_") or token.startswith("TLS_CHACHA20_") or token.startswith("TLS_SM4_")
+
+
+def merge_cipher_grades(
+    destination: Dict[str, Dict[str, str]],
+    incoming: Dict[str, Dict[str, str]],
+) -> None:
+    for version, grade_map in incoming.items():
+        target = destination.setdefault(version, {})
+        for suite, grade in grade_map.items():
+            target[suite] = grade
 
 
 def normalize_tls_version(raw: str) -> str:

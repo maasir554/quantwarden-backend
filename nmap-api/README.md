@@ -203,7 +203,11 @@ Highlights:
 
 - `open_ports`: detailed discovered services
 - `supported_tls_versions`: list of TLS/SSL versions discovered
+- `tls_key_exchange_algorithms`: explicit connection key exchange families inferred from suites
+- `tls_encryption_algorithms`: encryption algorithm families inferred from suites (e.g., AES_128_GCM, CHACHA20_POLY1305)
+- `tls_signature_algorithms`: signature/auth algorithms inferred from suites plus certificate signature metadata
 - `supported_cipher_suites`: map of TLS version to suites
+- `supported_cipher_grades`: map of TLS version -> cipher suite -> nmap grade (`A`-`F`)
 - `vulnerabilities`: per-vulnerability findings with evidence
 - `certificate_chain_issues`: issue flags and evidence
 - `certificate_chain_intelligence`: chain depth/confidence, OCSP/CA issuer URLs, SCT signal

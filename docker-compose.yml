@@ -31,6 +31,15 @@ services:
       - "${NMAP_PORT:-8010}:8010"
     restart: unless-stopped
 
+  openssl-api:
+    build:
+      context: ./openssl-api
+      dockerfile: Dockerfile
+    container_name: quantwarden-openssl-api
+    ports:
+      - "${OPENSSL_PORT:-8020}:8020"
+    restart: unless-stopped
+
   mcp-monorepo-server:
     build:
       context: ./mcp-monorepo-server
@@ -41,10 +50,12 @@ services:
       SUBFINDER_API_URL: "http://subfinder-api:8085"
       PYSSL_API_URL: "http://pyssl-api:8000"
       NMAP_API_URL: "http://nmap-api:8010"
+      OPENSSL_API_URL: "http://openssl-api:8020"
     depends_on:
       - subfinder-api
       - pyssl-api
       - nmap-api
+      - openssl-api
     stdin_open: true
     tty: true
     restart: unless-stopped

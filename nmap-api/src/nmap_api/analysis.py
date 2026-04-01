@@ -67,7 +67,11 @@ def build_response(domain: str, scan: NmapScanData) -> ScanResponse:
             for p in scan.open_ports
         ],
         supported_tls_versions=scan.tls_versions,
+        tls_key_exchange_algorithms=extract_tls_kex_algorithms(scan.tls_ciphers),
+        tls_encryption_algorithms=extract_tls_encryption_algorithms(scan.tls_ciphers),
+        tls_signature_algorithms=extract_tls_signature_algorithms(scan.tls_ciphers, scan.script_outputs),
         supported_cipher_suites=scan.tls_ciphers,
+        supported_cipher_grades=scan.tls_cipher_grades,
         vulnerabilities=vulnerabilities,
         certificate_chain_issues=cert_issues,
         security_headers=headers,
@@ -82,6 +86,81 @@ def build_response(domain: str, scan: NmapScanData) -> ScanResponse:
         raw_nmap_command=scan.command,
         scan_notes=notes,
     )
+
+
+def extract_tls_kex_algorithms(tls_ciphers: Dict[str, List[str]]) -> List[str]:
+    kex: set[str] = set()
+    for suites in tls_ciphers.values():
+        for suite in suites:
+            upper = suite.upper()
+            if upper.startswith("TLS_AES_") or upper.startswith("TLS_CHACHA20_") or upper.startswith("TLS_SM4_"):
+                kex.add("TLS13_(EC)DHE")
+                continue
+            if "_ECDHE_" in upper:
+                kex.add("ECDHE")
+                continue
+            if "_DHE_" in upper or "_EDH_" in upper:
+                kex.add("DHE")
+                continue
+            if "_PSK_" in upper:
+                kex.add("PSK")
+                continue
+            if "_SRP_" in upper:
+                kex.add("SRP")
+                continue
+            if "_KRB5_" in upper:
+                kex.add("KRB5")
+                continue
+            if "_RSA_" in upper and "_WITH_" in upper:
+                kex.add("RSA")
+    return sorted(kex)
+
+
+def extract_tls_encryption_algorithms(tls_ciphers: Dict[str, List[str]]) -> List[str]:
+    enc: set[str] = set()
+    for suites in tls_ciphers.values():
+        for suite in suites:
+            upper = suite.upper().strip()
+            token = ""
+            if "_WITH_" in upper:
+                token = upper.split("_WITH_", 1)[1]
+            elif upper.startswith("TLS_"):
+                token = upper[len("TLS_") :]
+            else:
+                token = upper
+
+            token = re.sub(r"_(SHA\d*|MD5)$", "", token)
+            token = token.strip("_")
+            if token:
+                enc.add(token)
+    return sorted(enc)
+
+
+def extract_tls_signature_algorithms(
+    tls_ciphers: Dict[str, List[str]],
+    script_outputs: Dict[str, str],
+) -> List[str]:
+    sig: set[str] = set()
+
+    for suites in tls_ciphers.values():
+        for suite in suites:
+            upper = suite.upper()
+            if "_ECDSA_" in upper:
+                sig.add("ECDSA")
+            if "_RSA_" in upper and "_PSK_" not in upper:
+                sig.add("RSA")
+            if "_DSS_" in upper:
+                sig.add("DSA")
+            if "_ANON_" in upper:
+                sig.add("ANON")
+
+    cert_output = script_outputs.get("ssl-cert", "")
+    for match in re.findall(r"(?i)Signature\s+Algorithm:\s*([^\n\r]+)", cert_output):
+        algo = match.strip()
+        if algo:
+            sig.add(f"CERT:{algo.upper()}")
+
+    return sorted(sig)
 
 
 def detect_vulnerabilities(scan: NmapScanData) -> List[VulnerabilityFinding]:
@@ -709,6 +788,12 @@ def apply_response_profile(resp: ScanResponse, profile: str) -> ScanResponse:
     for version, suites in list(resp.supported_cipher_suites.items()):
         if len(suites) > 20:
             resp.supported_cipher_suites[version] = suites[:20] + [f"... truncated {len(suites) - 20} suites"]
+
+    for version, grades in list(resp.supported_cipher_grades.items()):
+        if len(grades) > 20:
+            limited = dict(list(grades.items())[:20])
+            limited["...truncated..."] = f"{len(grades) - 20} grade entries truncated"
+            resp.supported_cipher_grades[version] = limited
 
     resp.scan_notes.append("Concise response profile enabled: evidence and large lists truncated.")
     return resp
