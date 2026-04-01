@@ -66,6 +66,18 @@ class RawDebug(BaseModel):
     command_outputs: dict[str, str] = Field(default_factory=dict)
 
 
+class IdentifierEntry(BaseModel):
+    name: str
+    oid: str | None = None
+    iana_code: str | None = None
+
+
+class IdentifierSection(BaseModel):
+    certificate_algorithms: list[IdentifierEntry] = Field(default_factory=list)
+    tls_groups: list[IdentifierEntry] = Field(default_factory=list)
+    tls_cipher_suites: list[IdentifierEntry] = Field(default_factory=list)
+
+
 class OpenSSLProfileResponse(BaseModel):
     target: str
     port: int
@@ -78,6 +90,7 @@ class OpenSSLProfileResponse(BaseModel):
     tls_signature_algorithms: list[str] = Field(default_factory=list)
     queried_groups: list[str] = Field(default_factory=list)
     supported_groups: list[str] = Field(default_factory=list)
+    identifiers: IdentifierSection = Field(default_factory=IdentifierSection)
     certificate: CertificateSummary
     raw_debug: RawDebug | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)

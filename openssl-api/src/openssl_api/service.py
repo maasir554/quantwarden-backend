@@ -13,7 +13,7 @@ from .openssl_runner import (
     openssl_x509_from_pem,
 )
 from .parsers import decompose_cipher_suite, parse_certificate_text, parse_s_client_brief
-from .schemas import OpenSSLProfileRequest, OpenSSLProfileResponse, RawDebug, VersionProbe
+from .schemas import IdentifierEntry, IdentifierSection, OpenSSLProfileRequest, OpenSSLProfileResponse, RawDebug, VersionProbe
 
 
 TLS_PROBES: list[tuple[str, str]] = [
@@ -22,6 +22,65 @@ TLS_PROBES: list[tuple[str, str]] = [
     ("TLSv1.2", "-tls1_2"),
     ("TLSv1.3", "-tls1_3"),
 ]
+
+
+TLS_GROUP_IANA_MAP = {
+    "secp256r1": "0x0017",
+    "secp384r1": "0x0018",
+    "secp521r1": "0x0019",
+    "brainpoolp256r1tls13": "0x001A",
+    "brainpoolp384r1tls13": "0x001B",
+    "brainpoolp512r1tls13": "0x001C",
+    "x25519": "0x001D",
+    "x448": "0x001E",
+    "ffdhe2048": "0x0100",
+    "ffdhe3072": "0x0101",
+    "ffdhe4096": "0x0102",
+    "ffdhe6144": "0x0103",
+    "ffdhe8192": "0x0104",
+    "mlkem512": "0x0200",
+    "mlkem768": "0x0201",
+    "mlkem1024": "0x0202",
+    "secp256r1mlkem768": "0x11EB",
+    "x25519mlkem768": "0x11EC",
+    "secp384r1mlkem1024": "0x11ED",
+    "curvesm2mlkem768": "0x11EE",
+    "x25519kyber768draft00": "0x6399",
+    "secp256r1kyber768draft00": "0x639A",
+}
+
+TLS_CIPHER_IANA_MAP = {
+    "TLS_AES_128_GCM_SHA256": "0x1301",
+    "TLS_AES_256_GCM_SHA384": "0x1302",
+    "TLS_CHACHA20_POLY1305_SHA256": "0x1303",
+    "TLS_AES_128_CCM_SHA256": "0x1304",
+    "TLS_AES_128_CCM_8_SHA256": "0x1305",
+    "ECDHE-ECDSA-AES128-GCM-SHA256": "0xC02B",
+    "ECDHE-ECDSA-AES256-GCM-SHA384": "0xC02C",
+    "ECDHE-RSA-AES128-GCM-SHA256": "0xC02F",
+    "ECDHE-RSA-AES256-GCM-SHA384": "0xC030",
+    "ECDHE-ECDSA-CHACHA20-POLY1305": "0xCCA9",
+    "ECDHE-RSA-CHACHA20-POLY1305": "0xCCA8",
+    "DHE-RSA-AES128-GCM-SHA256": "0x009E",
+    "DHE-RSA-AES256-GCM-SHA384": "0x009F",
+    "AES128-GCM-SHA256": "0x009C",
+    "AES256-GCM-SHA384": "0x009D",
+}
+
+# TLS cipher suites do not have a universal ASN.1 OID as a whole; we expose the
+# most specific component OID (prefer encryption, then hash, then auth).
+TLS_CIPHER_COMPONENT_OID_MAP = {
+    "AES_128_GCM": "2.16.840.1.101.3.4.1.6",
+    "AES_256_GCM": "2.16.840.1.101.3.4.1.46",
+    "AES_128_CCM": "2.16.840.1.101.3.4.1.7",
+    "AES_128_CCM_8": "2.16.840.1.101.3.4.1.7",
+    "CHACHA20_POLY1305": "1.2.840.113549.1.9.16.3.18",
+    "SHA256": "2.16.840.1.101.3.4.2.1",
+    "SHA384": "2.16.840.1.101.3.4.2.2",
+    "SHA512": "2.16.840.1.101.3.4.2.3",
+    "RSA": "1.2.840.113549.1.1.1",
+    "ECDSA": "1.2.840.10045.2.1",
+}
 
 
 def run_openssl_profile(req: OpenSSLProfileRequest) -> OpenSSLProfileResponse:
@@ -157,6 +216,13 @@ def run_openssl_profile(req: OpenSSLProfileRequest) -> OpenSSLProfileResponse:
         tls_signature_algorithms=tls_sig,
         queried_groups=queried_groups,
         supported_groups=supported_groups,
+        identifiers=_build_identifier_section(
+            cert_summary=cert_summary,
+            queried_groups=queried_groups,
+            supported_groups=supported_groups,
+            tls_negotiation_order=all_accepted_ciphers,
+            version_probes=version_probes,
+        ),
         certificate=cert_summary,
         raw_debug=RawDebug(commands=raw_cmds, command_outputs=raw_outputs) if req.include_raw_debug else None,
         metadata={
@@ -278,4 +344,83 @@ def _resolve_target_ip(target: str) -> str | None:
             ip = sockaddr[0]
             if ip:
                 return ip
+    return None
+
+
+def _build_identifier_section(
+    *,
+    cert_summary,
+    queried_groups: list[str],
+    supported_groups: list[str],
+    tls_negotiation_order: list[str],
+    version_probes: list[VersionProbe],
+) -> IdentifierSection:
+    cert_entries: list[IdentifierEntry] = []
+    for item in [cert_summary.signature_algorithm, cert_summary.public_key_algorithm]:
+        if item and item.name:
+            cert_entries.append(IdentifierEntry(name=item.name, oid=item.oid))
+    cert_entries = _dedupe_identifier_entries(cert_entries)
+
+    group_names = _dedupe_keep_order([*queried_groups, *supported_groups])
+    group_entries = [
+        IdentifierEntry(name=name, iana_code=TLS_GROUP_IANA_MAP.get(name.lower()))
+        for name in group_names
+    ]
+
+    suites = list(tls_negotiation_order)
+    suites.extend(
+        b.suite
+        for probe in version_probes
+        for b in probe.cipher_breakdowns
+    )
+    suite_names = _dedupe_keep_order(suites)
+
+    breakdown_by_suite = {}
+    for probe in version_probes:
+        for b in probe.cipher_breakdowns:
+            breakdown_by_suite.setdefault(b.suite.upper(), b)
+
+    suite_entries = [
+        IdentifierEntry(
+            name=name,
+            oid=_derive_cipher_suite_oid(name, breakdown_by_suite),
+            iana_code=TLS_CIPHER_IANA_MAP.get(name.upper()),
+        )
+        for name in suite_names
+    ]
+
+    return IdentifierSection(
+        certificate_algorithms=cert_entries,
+        tls_groups=group_entries,
+        tls_cipher_suites=suite_entries,
+    )
+
+
+def _dedupe_identifier_entries(entries: list[IdentifierEntry]) -> list[IdentifierEntry]:
+    seen: set[tuple[str, str | None, str | None]] = set()
+    out: list[IdentifierEntry] = []
+    for entry in entries:
+        key = (entry.name, entry.oid, entry.iana_code)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(entry)
+    return out
+
+
+def _derive_cipher_suite_oid(name: str, breakdown_by_suite: dict[str, object]) -> str | None:
+    breakdown = breakdown_by_suite.get(name.upper())
+    if breakdown is None:
+        return None
+
+    enc = getattr(breakdown, "encryption", None)
+    hsh = getattr(breakdown, "hash", None)
+    auth = getattr(breakdown, "authentication", None)
+
+    for token in [enc, hsh, auth]:
+        if not token:
+            continue
+        oid = TLS_CIPHER_COMPONENT_OID_MAP.get(str(token).upper())
+        if oid:
+            return oid
     return None

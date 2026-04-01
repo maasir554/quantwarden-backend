@@ -25,6 +25,8 @@ Deep OpenSSL CLI-based TLS profiling service.
 - Response also includes:
   - `queried_groups`: all TLS 1.3 groups supported by the local OpenSSL binary.
   - `supported_groups`: final list of server-detected TLS groups after active probing.
+  - `identifiers`: map-like section of names with `oid` or `iana_code` (when known) for certificate algorithms, TLS groups, and TLS cipher suites.
+    - For `tls_cipher_suites`, `oid` is derived from the suite components (encryption/hash/auth), because a full TLS cipher suite does not have a single universal ASN.1 OID.
 - Set `include_raw_debug=true` to include executed command strings and clipped command outputs.
 
 ## Run locally
