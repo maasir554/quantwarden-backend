@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import ipaddress
 import re
 import socket
+from collections.abc import Callable
 from datetime import datetime, UTC
 
 from .openssl_runner import (
@@ -106,31 +108,47 @@ def run_openssl_profile(req: OpenSSLProfileRequest) -> OpenSSLProfileResponse:
     resolved_ip = _resolve_target_ip(req.target)
     forced_probe_timeout = max(3, min(5, req.timeout_seconds))
     group_probe_timeout = max(2, min(3, req.timeout_seconds))
+    probe_batch_size = req.probe_batch_size
 
-    for version_label, tls_flag in TLS_PROBES:
-        probe = openssl_s_client(
-            target=req.target,
-            port=req.port,
-            sni=sni,
-            timeout_seconds=req.timeout_seconds,
-            tls_flag=tls_flag,
-        )
+    version_probe_results = _run_batched_probes(
+        [
+            lambda tls_flag=tls_flag: openssl_s_client(
+                target=req.target,
+                port=req.port,
+                sni=sni,
+                timeout_seconds=req.timeout_seconds,
+                tls_flag=tls_flag,
+            )
+            for _, tls_flag in TLS_PROBES
+        ],
+        probe_batch_size,
+    )
+
+    for (version_label, tls_flag), probe in zip(TLS_PROBES, version_probe_results):
         _capture(probe)
 
         handshake = parse_s_client_brief(probe.output)
         is_supported = probe.return_code == 0 and bool(handshake.cipher)
 
         accepted: list[str] = []
-        for candidate in candidates_by_version.get(version_label, [])[:24]:
-            forced = openssl_s_client(
-                target=req.target,
-                port=req.port,
-                sni=sni,
-                timeout_seconds=forced_probe_timeout,
-                tls_flag=tls_flag,
-                cipher=candidate if version_label != "TLSv1.3" else None,
-                ciphersuite=candidate if version_label == "TLSv1.3" else None,
-            )
+        candidates = candidates_by_version.get(version_label, [])[:24]
+        forced_results = _run_batched_probes(
+            [
+                lambda candidate=candidate: openssl_s_client(
+                    target=req.target,
+                    port=req.port,
+                    sni=sni,
+                    timeout_seconds=forced_probe_timeout,
+                    tls_flag=tls_flag,
+                    cipher=candidate if version_label != "TLSv1.3" else None,
+                    ciphersuite=candidate if version_label == "TLSv1.3" else None,
+                )
+                for candidate in candidates
+            ],
+            probe_batch_size,
+        )
+
+        for candidate, forced in zip(candidates, forced_results):
             _capture(forced)
 
             forced_hs = parse_s_client_brief(forced.output)
@@ -175,6 +193,7 @@ def run_openssl_profile(req: OpenSSLProfileRequest) -> OpenSSLProfileResponse:
         sni=sni,
         groups=queried_groups,
         timeout_seconds=group_probe_timeout,
+        batch_size=probe_batch_size,
         capture=_capture,
     )
 
@@ -301,18 +320,26 @@ def _probe_tls13_groups(
     sni: str,
     groups: list[str],
     timeout_seconds: int,
+    batch_size: int,
     capture,
 ) -> list[str]:
+    probe_results = _run_batched_probes(
+        [
+            lambda group=group: openssl_s_client(
+                target=target,
+                port=port,
+                sni=sni,
+                timeout_seconds=timeout_seconds,
+                tls_flag="-tls1_3",
+                groups=group,
+            )
+            for group in groups
+        ],
+        batch_size,
+    )
+
     out: list[str] = []
-    for group in groups:
-        result = openssl_s_client(
-            target=target,
-            port=port,
-            sni=sni,
-            timeout_seconds=timeout_seconds,
-            tls_flag="-tls1_3",
-            groups=group,
-        )
+    for group, result in zip(groups, probe_results):
         capture(result)
 
         parsed = parse_s_client_brief(result.output)
@@ -321,6 +348,32 @@ def _probe_tls13_groups(
             negotiated = (parsed.negotiated_group or "").strip()
             out.append(negotiated or group)
     return _dedupe_keep_order(out)
+
+
+def _run_batched_probes(tasks: list[Callable[[], CommandResult]], batch_size: int) -> list[CommandResult]:
+    if not tasks:
+        return []
+
+    results: list[CommandResult | None] = [None] * len(tasks)
+    safe_batch_size = max(1, batch_size)
+
+    for start in range(0, len(tasks), safe_batch_size):
+        end = min(start + safe_batch_size, len(tasks))
+        batch = tasks[start:end]
+        with ThreadPoolExecutor(max_workers=len(batch)) as executor:
+            futures = {executor.submit(task): idx for idx, task in enumerate(batch, start=start)}
+            for future in as_completed(futures):
+                idx = futures[future]
+                try:
+                    results[idx] = future.result()
+                except Exception as exc:  # noqa: BLE001
+                    results[idx] = CommandResult(
+                        command="parallel_probe",
+                        return_code=1,
+                        output=f"[internal-error] probe execution failed: {exc}",
+                    )
+
+    return [result for result in results if result is not None]
 
 
 def _resolve_target_ip(target: str) -> str | None:

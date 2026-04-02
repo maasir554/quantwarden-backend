@@ -10,6 +10,7 @@ class OpenSSLProfileRequest(BaseModel):
     target: str = Field(..., description="Domain, IPv4, or IPv6 target")
     port: int = Field(default=443, ge=1, le=65535)
     timeout_seconds: int = Field(default=12, ge=3, le=60)
+    probe_batch_size: int = Field(default=10, ge=1, le=50)
     include_raw_debug: bool = Field(default=False)
 
 

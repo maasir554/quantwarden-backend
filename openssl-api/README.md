@@ -13,6 +13,7 @@ Deep OpenSSL CLI-based TLS profiling service.
   "target": "example.com",
   "port": 443,
   "timeout_seconds": 12,
+  "probe_batch_size": 10,
   "include_raw_debug": false
 }
 ```
@@ -21,6 +22,7 @@ Deep OpenSSL CLI-based TLS profiling service.
 
 - Always runs in deep profile mode.
 - Supports domain, IPv4, and IPv6 targets.
+- Probes are executed in parallel batches. `probe_batch_size` controls max concurrent probes per batch (default `10`).
 - Response includes TLS version support, accepted ciphers in offer order, suite decomposition, certificate summary, and OIDs.
 - Response also includes:
   - `queried_groups`: all TLS 1.3 groups supported by the local OpenSSL binary.
@@ -28,6 +30,7 @@ Deep OpenSSL CLI-based TLS profiling service.
   - `identifiers`: map-like section of names with `oid` or `iana_code` (when known) for certificate algorithms, TLS groups, and TLS cipher suites.
     - For `tls_cipher_suites`, `oid` is derived from the suite components (encryption/hash/auth), because a full TLS cipher suite does not have a single universal ASN.1 OID.
 - Set `include_raw_debug=true` to include executed command strings and clipped command outputs.
+- `timeout_seconds` is applied per OpenSSL command; it is not a total request deadline.
 
 ## Run locally
 
