@@ -178,14 +178,13 @@ def run_openssl_profile(req: OpenSSLProfileRequest) -> OpenSSLProfileResponse:
     )
     _capture(cert_probe)
 
-    first_pem = _extract_first_pem(cert_probe.output)
-    cert_summary_text = ""
-    if first_pem:
-        cert_text_result = openssl_x509_from_pem(first_pem, req.timeout_seconds)
+    cert_chain: list = []
+    for pem in _extract_all_pems(cert_probe.output):
+        cert_text_result = openssl_x509_from_pem(pem, req.timeout_seconds)
         _capture(cert_text_result)
-        cert_summary_text = cert_text_result.output
+        cert_chain.append(parse_certificate_text(cert_text_result.output))
 
-    cert_summary = parse_certificate_text(cert_summary_text)
+    cert_summary = cert_chain[0] if cert_chain else parse_certificate_text("")
 
     supported_groups = _probe_tls13_groups(
         target=req.target,
@@ -243,6 +242,7 @@ def run_openssl_profile(req: OpenSSLProfileRequest) -> OpenSSLProfileResponse:
             version_probes=version_probes,
         ),
         certificate=cert_summary,
+        certificate_chain=cert_chain,
         raw_debug=RawDebug(commands=raw_cmds, command_outputs=raw_outputs) if req.include_raw_debug else None,
         metadata={
             "mode": "deep",
@@ -286,14 +286,11 @@ def _dedupe_keep_order(values: list[str]) -> list[str]:
     return out
 
 
-def _extract_first_pem(s_client_output: str) -> str | None:
-    match = re.search(
+def _extract_all_pems(s_client_output: str) -> list[str]:
+    return re.findall(
         r"-----BEGIN CERTIFICATE-----[\s\S]+?-----END CERTIFICATE-----",
         s_client_output,
     )
-    if match:
-        return match.group(0)
-    return None
 
 
 def _clip(text: str, limit: int = 6000) -> str:

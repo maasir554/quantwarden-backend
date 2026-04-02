@@ -93,5 +93,6 @@ class OpenSSLProfileResponse(BaseModel):
     supported_groups: list[str] = Field(default_factory=list)
     identifiers: IdentifierSection = Field(default_factory=IdentifierSection)
     certificate: CertificateSummary
+    certificate_chain: list[CertificateSummary] = Field(default_factory=list)
     raw_debug: RawDebug | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)

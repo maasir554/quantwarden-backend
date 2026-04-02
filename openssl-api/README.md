@@ -26,6 +26,7 @@ timeout of 3 secs per probe is generally enough for public servers. maximum reco
 - Probes are executed with a sliding window. `probe_batch_size` controls max concurrent in-flight probes (default `10`).
 - Response includes TLS version support, accepted ciphers in offer order, suite decomposition, certificate summary, and OIDs.
 - Response also includes:
+  - `certificate_chain`: parsed summaries for all certificates returned by `openssl s_client -showcerts` (leaf first).
   - `queried_groups`: all TLS 1.3 groups supported by the local OpenSSL binary.
   - `supported_groups`: final list of server-detected TLS groups after active probing.
   - `identifiers`: map-like section of names with `oid` or `iana_code` (when known) for certificate algorithms, TLS groups, and TLS cipher suites.

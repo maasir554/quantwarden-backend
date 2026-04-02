@@ -116,9 +116,15 @@ def _decompose_tls12(suite: str) -> CipherSuiteBreakdown:
         raise ValueError(f"unable to parse TLS 1.2 cipher suite: {suite}")
 
     key_exchange = parts[0]
-    authentication = parts[1]
+    # Some OpenSSL TLS1.2 names omit explicit auth and start encryption right
+    # after key exchange, e.g. ECDHE-ARIA256-GCM-SHA384.
+    if _is_encryption_start(parts[1]):
+        authentication = None
+        remainder = parts[1:]
+    else:
+        authentication = parts[1]
+        remainder = parts[2:]
 
-    remainder = parts[2:]
     if len(remainder) < 2:
         raise ValueError(f"unable to parse TLS 1.2 cipher suite tail: {suite}")
 
@@ -185,6 +191,11 @@ def _normalize_encryption(raw: str) -> str:
 def _contains_chacha20_poly1305(parts: list[str]) -> bool:
     joined = "-".join(parts).upper()
     return "CHACHA20-POLY1305" in joined
+
+
+def _is_encryption_start(token: str) -> bool:
+    upper = token.upper()
+    return upper.startswith(("AES", "ARIA", "CAMELLIA", "CHACHA20", "NULL", "SM4"))
 
 
 def _validate_breakdown(parsed: CipherSuiteBreakdown) -> None:
