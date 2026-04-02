@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 import ipaddress
 import re
 import socket
@@ -357,13 +357,20 @@ def _run_batched_probes(tasks: list[Callable[[], CommandResult]], batch_size: in
     results: list[CommandResult | None] = [None] * len(tasks)
     safe_batch_size = max(1, batch_size)
 
-    for start in range(0, len(tasks), safe_batch_size):
-        end = min(start + safe_batch_size, len(tasks))
-        batch = tasks[start:end]
-        with ThreadPoolExecutor(max_workers=len(batch)) as executor:
-            futures = {executor.submit(task): idx for idx, task in enumerate(batch, start=start)}
-            for future in as_completed(futures):
-                idx = futures[future]
+    next_task_index = 0
+    with ThreadPoolExecutor(max_workers=min(safe_batch_size, len(tasks))) as executor:
+        in_flight: dict = {}
+
+        # Prime the sliding window.
+        while next_task_index < len(tasks) and len(in_flight) < safe_batch_size:
+            future = executor.submit(tasks[next_task_index])
+            in_flight[future] = next_task_index
+            next_task_index += 1
+
+        while in_flight:
+            done, _ = wait(in_flight, return_when=FIRST_COMPLETED)
+            for future in done:
+                idx = in_flight.pop(future)
                 try:
                     results[idx] = future.result()
                 except Exception as exc:  # noqa: BLE001
@@ -372,6 +379,11 @@ def _run_batched_probes(tasks: list[Callable[[], CommandResult]], batch_size: in
                         return_code=1,
                         output=f"[internal-error] probe execution failed: {exc}",
                     )
+
+                if next_task_index < len(tasks):
+                    next_future = executor.submit(tasks[next_task_index])
+                    in_flight[next_future] = next_task_index
+                    next_task_index += 1
 
     return [result for result in results if result is not None]
 

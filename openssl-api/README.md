@@ -12,17 +12,18 @@ Deep OpenSSL CLI-based TLS profiling service.
 {
   "target": "example.com",
   "port": 443,
-  "timeout_seconds": 12,
+  "timeout_seconds": 3,
   "probe_batch_size": 10,
   "include_raw_debug": false
 }
 ```
+timeout of 3 secs per probe is generally enough for public servers. maximum recommend is 5 secs.
 
 ## Notes
 
 - Always runs in deep profile mode.
 - Supports domain, IPv4, and IPv6 targets.
-- Probes are executed in parallel batches. `probe_batch_size` controls max concurrent probes per batch (default `10`).
+- Probes are executed with a sliding window. `probe_batch_size` controls max concurrent in-flight probes (default `10`).
 - Response includes TLS version support, accepted ciphers in offer order, suite decomposition, certificate summary, and OIDs.
 - Response also includes:
   - `queried_groups`: all TLS 1.3 groups supported by the local OpenSSL binary.
