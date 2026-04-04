@@ -1,33 +1,24 @@
 from __future__ import annotations
 
-import shutil
-import socket
-
-from fastapi import HTTPException
-
-from .analysis import apply_response_profile, build_response
-from .nmap_runner import run_nmap
-from .schemas import ScanResponse
+from .probe_engine import PortProbeEngine, resolve_target
+from .schemas import OpenPortResult, PortDiscoveryRequest, PortDiscoveryResponse
 
 
-def scan_domain(
-    domain: str, full_port_scan: bool, response_profile: str = "full", udp_scan: bool = False
-) -> ScanResponse:
-    if not domain or "://" in domain:
-        raise HTTPException(status_code=400, detail="Provide a bare domain, e.g., example.com")
+async def discover_ports(req: PortDiscoveryRequest) -> PortDiscoveryResponse:
+    ports = req.normalized_ports()
+    resolved_addresses = await resolve_target(req.target)
+    engine = PortProbeEngine(resolved_addresses=resolved_addresses, probe_timeout_ms=req.probe_timeout_ms)
+    open_port_map = await engine.scan_ports(ports=ports, probe_batch_size=req.probe_batch_size)
 
-    if shutil.which("nmap") is None:
-        raise HTTPException(status_code=500, detail="nmap is not installed or not in PATH")
-
-    try:
-        socket.gethostbyname(domain)
-    except socket.gaierror as exc:
-        raise HTTPException(status_code=400, detail=f"DNS resolution failed: {exc}") from exc
-
-    try:
-        scan_data = run_nmap(domain=domain, full_port_scan=full_port_scan, include_udp=udp_scan)
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Scan failed: {exc}") from exc
-
-    resp = build_response(domain=domain, scan=scan_data)
-    return apply_response_profile(resp, response_profile)
+    return PortDiscoveryResponse(
+        target=req.target,
+        resolved_addresses=[item.address for item in resolved_addresses],
+        requested_port_count=len(ports),
+        probed_port_count=len(ports),
+        probe_batch_size=min(req.probe_batch_size, len(ports)),
+        probe_timeout_ms=req.probe_timeout_ms,
+        open_ports=[
+            OpenPortResult(port=port, addresses=addresses)
+            for port, addresses in open_port_map.items()
+        ],
+    )

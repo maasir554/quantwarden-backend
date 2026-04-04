@@ -1,1 +1,1 @@
-"""Nmap-based Security Intelligence API package."""
+"""Port discovery API package."""
