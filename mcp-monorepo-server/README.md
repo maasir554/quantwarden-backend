@@ -6,8 +6,7 @@ Stateless MCP server that lets AI agents call your monorepo backend APIs.
 
 - `list_services`
 - `check_services_health`
-- `nmap_security_intelligence`
-- `nmap_ethical_scan`
+- `nmap_port_discovery`
 - `pyssl_analysis`
 - `openssl_profile`
 - `subfinder_combined`

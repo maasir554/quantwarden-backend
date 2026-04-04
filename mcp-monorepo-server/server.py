@@ -115,45 +115,30 @@ def check_services_health(timeout_seconds: float = 8.0) -> Dict[str, Any]:
 
 
 @mcp.tool()
-def nmap_security_intelligence(
-    domain: str,
-    full_port_scan: bool = False,
-    udp_scan: bool = False,
-    response_profile: Literal["full", "concise"] = "full",
+def nmap_port_discovery(
+    target: str,
+    port_list: list[int] | None = None,
+    port_ranges: list[Dict[str, int]] | None = None,
+    probe_batch_size: int = 40,
+    probe_timeout_ms: int = 500,
     timeout_seconds: float = 120.0,
 ) -> Dict[str, Any]:
-    """Run Nmap security intelligence scan using /api/v1/security-intelligence."""
+    """Run TCP port discovery using /api/v1/port-discovery."""
+    body: Dict[str, Any] = {
+        "target": target,
+        "probe_batch_size": probe_batch_size,
+        "probe_timeout_ms": probe_timeout_ms,
+    }
+    if port_list is not None:
+        body["port_list"] = port_list
+    if port_ranges is not None:
+        body["port_ranges"] = port_ranges
+
     return _request(
         service="nmap",
         method="POST",
-        path="/api/v1/security-intelligence",
-        body={
-            "domain": domain,
-            "full_port_scan": full_port_scan,
-            "udp_scan": udp_scan,
-            "response_profile": response_profile,
-        },
-        timeout_seconds=timeout_seconds,
-    )
-
-
-@mcp.tool()
-def nmap_ethical_scan(
-    target: str,
-    include_tls_version_tests: bool = True,
-    user_agent: str = "PQCSecurityScanner/1.0 (+https://example.com/scanner-info; security@example.com)",
-    timeout_seconds: float = 180.0,
-) -> Dict[str, Any]:
-    """Run the stateless ethical scan using /ethical-scan."""
-    return _request(
-        service="nmap",
-        method="POST",
-        path="/ethical-scan",
-        body={
-            "target": target,
-            "include_tls_version_tests": include_tls_version_tests,
-            "user_agent": user_agent,
-        },
+        path="/api/v1/port-discovery",
+        body=body,
         timeout_seconds=timeout_seconds,
     )
 
